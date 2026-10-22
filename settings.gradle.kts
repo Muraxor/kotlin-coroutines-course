@@ -1,0 +1,11 @@
+rootProject.name = "kotlin-coroutines-course"
+include("01-basics")
+include("02-results")
+include("03-dispatchers")
+include("04-cancellation")
+include("05-errors")
+include("06-shared-state")
+include("07-flow")
+include("08-hot-flow")
+include("09-channels")
+include("10-testing-project")
