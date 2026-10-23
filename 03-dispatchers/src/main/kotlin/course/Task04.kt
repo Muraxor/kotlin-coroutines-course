@@ -11,9 +11,8 @@ import kotlin.system.measureTimeMillis
 /** 03.04. Вернуть вычисленный результат. См. TASKS.md. */
 fun main() = runBlocking {
     runExercise("03.04") {
-        suspend fun calculate(): Int {
-            CoroutineScope(Dispatchers.Default).launch { (1..1000).sum() }
-            return -1 // TODO: исправь всю функцию
+        suspend fun calculate(): Int = withContext(Dispatchers.Default) {
+            (1..1000).sum()
         }
         event("Ответ: ${calculate()}")
     }

@@ -64,6 +64,23 @@ fun main() = runBlocking {
         var result = emptyList<Pair<String, Int>>()
         // TODO: Получи результаты для всех файлов одновременно.
         // Блокирующее чтение выполняй вне вызывающего потока,
+
+        val io = Dispatchers.IO.limitedParallelism(2)
+        val cpu = Dispatchers.Default.limitedParallelism(1)
+
+        suspend fun process(name: String): Pair<String, Int> {
+            val read = withContext(io) {
+                legacyRead(name)
+            }
+            return withContext(cpu) {
+                analyze(name, read)
+            }
+        }
+
+        result = names.map {
+            async { process(it) }
+        }.awaitAll()
+
         // но одновременно читай не более двух файлов.
         // Анализ выполняй в вычислительном контексте по одному файлу.
         // Не жди всех чтений перед началом анализа готовых файлов.

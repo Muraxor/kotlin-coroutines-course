@@ -11,7 +11,7 @@ import kotlin.system.measureTimeMillis
 /** 04.03. Мягкий таймаут. См. TASKS.md. */
 fun main() = runBlocking {
     runExercise("04.03") {
-        val result: String? = run { delay(500); "ready" } // TODO: ограничь 100 мс
+        val result: String? = withTimeoutOrNull(100) { delay(500); "ready" }
          event("Результат: $result")
     }
 }

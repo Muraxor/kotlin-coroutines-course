@@ -66,79 +66,83 @@ checkResult("Результат вычисления", result == 500500)
 
 [Вернуться к задаче](TASKS.md)
 
-## 03.05 · Имя корутины
+## 03.05 · Логическое имя и поток
 
-**Что сделать:** Назови дочернюю корутину loader и выведи CoroutineName из её контекста. Затем запусти ребёнка с именем parser.
+**Что сделать:** Одновременно запусти две дочерние корутины на `Default`, составив их контекст из dispatcher и логического имени.
 
 ```kotlin
-launch(CoroutineName("loader")) {
-    event("Имя: ${currentCoroutineContext()[CoroutineName]?.name}")
-    launch(CoroutineName("parser")) { event("Имя: ${currentCoroutineContext()[CoroutineName]?.name}") }
-}.join()
+coroutineScope {
+    launch(Dispatchers.Default + CoroutineName("loader")) { observe() }
+    launch(Dispatchers.Default + CoroutineName("parser")) { observe() }
+}
 ```
 
-**Почему:** CoroutineName — отдельный элемент контекста; имя корутины не равно имени потока.
+**Почему:** `CoroutineName` описывает логическую операцию, а dispatcher выбирает исполнителя. Две корутины с разными именами могут оказаться на одном рабочем потоке; имя корутины не управляет планированием.
 
-**Ожидаемый результат:** Видны loader и parser.
+**Ожидаемый результат:** Видны имена `loader` и `parser`, проверка имеет статус `OK`; имена потоков не фиксированы.
 
 [Вернуться к задаче](TASKS.md)
 
 ## 03.06 · Внедрить dispatcher
 
-**Что сделать:** У функции вычисления сделай параметр CoroutineDispatcher. Выполни её на Default и на текущем диспетчере, выведи одинаковый результат.
+**Что сделать:** Передай dispatcher функции явно, проверь фактический элемент контекста и вызови функцию с двумя разными зависимостями.
 
 ```kotlin
-suspend fun calculate(dispatcher: CoroutineDispatcher): Int = withContext(dispatcher) { event("Вычисление"); 6 * 7 }
-val current = currentCoroutineContext()[ContinuationInterceptor] as CoroutineDispatcher
-event("Default: ${calculate(Dispatchers.Default)}")
-event("Текущий: ${calculate(current)}")
+suspend fun calculate(dispatcher: CoroutineDispatcher): Int = withContext(dispatcher) {
+    contextMatches += currentCoroutineContext()[ContinuationInterceptor] === dispatcher
+    event("Вычисление на ${Thread.currentThread().name}")
+    6 * 7
+}
+results = listOf(
+    calculate(Dispatchers.Default),
+    calculate(Dispatchers.IO),
+)
 ```
 
-**Почему:** Внедрение диспетчера отделяет логику от среды выполнения и упрощает тестирование.
+**Почему:** Функция больше не выбирает среду выполнения внутри себя. Вызывающий код может подставить подходящий dispatcher, а в тесте — управляемую тестовую реализацию. `Default` и `IO` могут использовать потоки с похожими именами, поэтому проверяется элемент контекста, а не текст имени потока.
 
-**Ожидаемый результат:** В обоих случаях 42, контекст выполнения может отличаться.
+**Ожидаемый результат:** Ответы `[42, 42]` и две строки `OK`.
 
 [Вернуться к задаче](TASKS.md)
 
 ## 03.07 · CPU-работа и ожидание
 
-**Что сделать:** Добавь короткий ticker в вызывающем контексте, а серию вычислений запусти на Default. В журнале должны быть видны тики во время вычислений.
+**Что сделать:** Перенеси три готовых процессорных шага на `Default`. Между шагами нет `delay`: вызывающий поток остаётся свободным именно благодаря смене dispatcher.
 
 ```kotlin
-coroutineScope {
-    launch { repeat(3) { delay(30); event("Тик $it") } }
-    withContext(Dispatchers.Default) {
-        var total = 0L
-        repeat(3) { step -> repeat(2_000_000) { total += it }; event("Вычислен шаг $step"); delay(40) }
-        event("Сумма: $total")
+result = withContext(Dispatchers.Default) {
+    var value = 1L
+    repeat(3) { step ->
+        value = cpuStep(value.toInt() + step)
+        completedSteps.incrementAndGet()
+        event("Вычислен шаг ${step + 1}")
     }
+    value
 }
 ```
 
-**Почему:** Отдельный вычислительный dispatcher позволяет не занимать вызывающий поток. Задержка добавлена только для наглядности опыта.
+**Почему:** `cpuStep` не приостанавливается и занял бы поток `runBlocking`. `withContext(Dispatchers.Default)` переносит эту работу на вычислительный пул, поэтому ticker продолжает выполняться у вызывающего.
 
-**Ожидаемый результат:** Тики и вычислительные шаги могут чередоваться; всё завершается.
+**Ожидаемый результат:** Во время вычисления появляются тики, выполнены три шага и обе проверки имеют статус `OK`.
 
 [Вернуться к задаче](TASKS.md)
 
 ## 03.08 · Ограничить параллельное исполнение
 
-**Что сделать:** Создай представление Default с параллелизмом 2. Запусти шесть блоков, каждый занимает поток на 30 мс. Измерь максимум одновременно исполняемых блоков.
+**Что сделать:** Создай представление `Default` с параллелизмом 2 и запусти на нём шесть готовых блокирующих секций.
 
 ```kotlin
 val dispatcher = Dispatchers.Default.limitedParallelism(2)
-val active = AtomicInteger(); val peak = AtomicInteger()
-coroutineScope { repeat(6) { id -> launch(dispatcher) {
-    val n = active.incrementAndGet(); peak.accumulateAndGet(n, ::maxOf)
-    try { event("Блок $id активных=$n"); Thread.sleep(30) } finally { active.decrementAndGet() }
-} } }
-event("Пик: ${peak.get()}")
-checkResult("Не больше 2", peak.get() <= 2)
+coroutineScope {
+    repeat(6) { id ->
+        launch(dispatcher) { blockingSection(id) }
+    }
+}
 ```
 
-**Почему:** limitedParallelism ограничивает исполнение на потоках. Блокировка здесь лишь учебный способ удержать исполняемый блок; для suspend-операций в полёте нужен другой контроль.
+**Почему:** `limitedParallelism(2)` ограничивает число одновременно исполняемых блоков этого представления dispatcher. `Thread.sleep` здесь намеренно удерживает блок, чтобы ограничение можно было измерить; для ограничения числа приостановленных операций нужен другой механизм, например `Semaphore`.
 
-**Ожидаемый результат:** Пик не превышает 2; конкретно 2 не гарантируется.
+**Ожидаемый результат:** Завершены все шесть блоков, пик равен 1 или 2 и обе проверки имеют статус `OK`.
 
 [Вернуться к задаче](TASKS.md)
 
@@ -163,26 +167,27 @@ result = coroutineScope {
 
 [Вернуться к задаче](TASKS.md)
 
-## 03.10 · Сервис с двумя диспетчерами
+## 03.10 · Собственный пул потоков
 
-**Что сделать:** Добавь сервис и обработку списка вместо TODO, оставив временную переменную `answers`.
+**Что сделать:** Создай фиксированный `ExecutorService`, преобразуй его в dispatcher, запусти все операции и закрой принадлежащий программе ресурс.
 
 ```kotlin
-class Service(private val io: CoroutineDispatcher, private val cpu: CoroutineDispatcher) {
-    suspend fun load(number: Int): Int {
-        val input = withContext(io) { legacyRead(number) }
-        return withContext(cpu) { double(input) }
+val executor = java.util.concurrent.Executors.newFixedThreadPool(2) { task ->
+    Thread(task, "course-worker-${createdThreads.incrementAndGet()}")
+}
+executor.asCoroutineDispatcher().use { dispatcher ->
+    results = coroutineScope {
+        inputs.map { number ->
+            async(dispatcher) { blockingWork(number) }
+        }.awaitAll()
     }
 }
-val service = Service(io, cpu)
-answers = coroutineScope {
-    inputs.map { number -> async { service.load(number) } }.awaitAll()
-}
+executorWasClosed = executor.isShutdown
 ```
 
-**Почему:** Сервис не выбирает исполнителей сам, а использует внедрённые зависимости. `withContext` гарантирует контекст для каждой стадии и возвращает её значение; одновременные вызовы сервиса сохраняют порядок ответов при сборе.
+**Почему:** В отличие от `limitedParallelism`, собственный executor создаёт принадлежащие приложению потоки. `asCoroutineDispatcher` позволяет планировать на них корутины, а `use` закрывает dispatcher и underlying executor. Все `async` создаются до `awaitAll`, поэтому две операции могут выполняться одновременно; порядок списка результатов соответствует порядку `Deferred`.
 
-**Ожидаемый результат:** `[42, 26, 14]`, обе стадии каждого числа и две строки `OK`.
+**Ожидаемый результат:** `[1, 4, 9, 16, 25, 36]`, два именованных потока, пик 2, закрытый пул и три строки `OK`.
 
 [Вернуться к задаче](TASKS.md)
 
@@ -192,20 +197,15 @@ answers = coroutineScope {
 
 ```kotlin
 withContext(Dispatchers.Default + CoroutineName("parent")) {
-    val parentJob = coroutineContext[Job]!!
     val parentDispatcher = coroutineContext[ContinuationInterceptor]
     suspend fun observe(waitMs: Long) {
         val context = currentCoroutineContext()
-        val job = context[Job]!!
         val name = context[CoroutineName]?.name.orEmpty()
         seen.add(name)
-        if (job !== parentJob && parentJob.children.any { it === job }) {
-            parentLinks.incrementAndGet()
-        }
         if (context[ContinuationInterceptor] === parentDispatcher) {
             inheritedDispatchers.incrementAndGet()
         }
-        event("Ребёнок $name: Job=$job")
+        event("Ребёнок $name на ${Thread.currentThread().name}")
         delay(waitMs)
         completed.incrementAndGet()
     }
@@ -214,9 +214,9 @@ withContext(Dispatchers.Default + CoroutineName("parent")) {
 }
 ```
 
-**Почему:** Дочерняя корутина получает новый `Job`, связанный с родительским, и наследует диспетчер. Новое `CoroutineName` заменяет только элемент имени. `withContext` возвращается после завершения обоих детей, поэтому итоговые счётчики уже окончательные.
+**Почему:** Первый ребёнок наследует оба элемента контекста. У второго новый `CoroutineName` заменяет родительское имя, но не затрагивает dispatcher. `withContext` возвращается после завершения обоих детей, поэтому итоговые счётчики уже окончательные.
 
-**Ожидаемый результат:** Два имени, две связи с родителем, два наследования диспетчера и три строки `OK`.
+**Ожидаемый результат:** Имена `parent` и `child`, два унаследованных dispatcher и три строки `OK`.
 
 [Вернуться к задаче](TASKS.md)
 

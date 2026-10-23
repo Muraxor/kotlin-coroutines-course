@@ -15,6 +15,12 @@ subprojects {
     }
     extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> { jvmToolchain(21) }
     extensions.configure<JavaApplication> { mainClass.set("course.MainKt") }
+    tasks.withType<JavaExec>().configureEach {
+        jvmArgs(
+            "-Dstdout.encoding=UTF-8",
+            "-Dstderr.encoding=UTF-8",
+        )
+    }
     tasks.withType<Test>().configureEach { useJUnitPlatform() }
     val mainSourceSet = extensions.getByType<SourceSetContainer>()["main"]
     (1..12).forEach { index ->

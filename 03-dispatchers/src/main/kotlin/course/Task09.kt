@@ -14,6 +14,7 @@ fun main() = runBlocking {
         val inputs = listOf("left" to "a,b,c", "right" to "d,e")
         val activeReads = AtomicInteger()
         val peakReads = AtomicInteger()
+
         fun legacyRead(input: Pair<String, String>): String {
             val active = activeReads.incrementAndGet()
             peakReads.accumulateAndGet(active, ::maxOf)
@@ -26,6 +27,7 @@ fun main() = runBlocking {
                 activeReads.decrementAndGet()
             }
         }
+
         fun countParts(text: String): Int {
             event("Обработка $text")
             return text.split(',').size
@@ -34,12 +36,33 @@ fun main() = runBlocking {
         event("Два независимых источника: $inputs")
         var result = emptyList<Pair<String, Int>>()
         // TODO: Начни обе загрузки до ожидания первого ответа.
+
+        suspend fun process(input: Pair<String, String>): Pair<String, Int> {
+            val value = withContext(Dispatchers.IO) {
+                legacyRead(input)
+            }
+            val amount = withContext(Dispatchers.Default) {
+                countParts(value)
+            }
+
+            return input.first to amount
+        }
+
+        result = coroutineScope {
+            inputs.map {
+                async { process(it) }
+            }.awaitAll()
+        }
+
+
         // Каждое блокирующее чтение и последующую обработку
         // выполни в подходящих контекстах.
         // Сохрани результаты в порядке входных данных.
         event("Результат: $result, пик чтений: ${peakReads.get()}")
-        checkResult("Оба ответа в исходном порядке",
-            result == listOf("left" to 3, "right" to 2))
+        checkResult(
+            "Оба ответа в исходном порядке",
+            result == listOf("left" to 3, "right" to 2)
+        )
         checkResult("Чтения перекрылись", peakReads.get() == 2)
     }
 }

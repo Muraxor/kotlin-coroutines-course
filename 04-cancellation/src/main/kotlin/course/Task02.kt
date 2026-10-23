@@ -12,9 +12,14 @@ import kotlin.system.measureTimeMillis
 fun main() = runBlocking {
     runExercise("04.02") {
         val job = launch {
-            // TODO: сделай так, чтобы сообщение об очистке появилось и после отмены
-            repeat(20) { delay(100) }
+            try {
+                repeat(20) { delay(100) }
+            } finally {
+                event("Очистка")
+            }
         }
-        delay(50); job.cancelAndJoin(); event("Остановка завершена")
+        delay(50);
+        job.cancelAndJoin();
+        event("Остановка завершена")
     }
 }

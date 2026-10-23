@@ -26,6 +26,19 @@ CoroutineName помогает читать логи нескольких одн
 
 [Официальный раздел](https://kotlinlang.org/docs/coroutine-context-and-dispatchers.html#naming-coroutines-for-debugging).
 
+## Собственные потоки
+
+Иногда программе нужен не общий пул, а принадлежащие ей потоки: например, для изоляции старой блокирующей библиотеки или интеграции с API, привязанным к определённым потокам. JVM-executor можно преобразовать в `CoroutineDispatcher` через `asCoroutineDispatcher()`. Такой dispatcher владеет ресурсами и должен быть закрыт после работы. Это отличается от `Dispatchers.Default.limitedParallelism(n)`: ограниченное представление использует общий пул и отдельно не закрывается.
+
+```kotlin
+val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+executor.asCoroutineDispatcher().use { dispatcher ->
+    withContext(dispatcher) { blockingCall() }
+}
+```
+
+Собственный пул не следует создавать на каждый мелкий вызов. Обычно он живёт столько же, сколько компонент, которому действительно нужны выделенные потоки.
+
 ## Разобранный пример
 
 ```kotlin

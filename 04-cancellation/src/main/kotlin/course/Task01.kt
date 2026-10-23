@@ -13,7 +13,7 @@ fun main() = runBlocking {
     runExercise("04.01") {
         val job = launch { repeat(20) { delay(100); event("Тик $it") } }
         delay(250)
-        // TODO: отмени job и дождись его завершения
+        job.cancelAndJoin()
         event("Остановлено")
     }
 }
